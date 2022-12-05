@@ -30,9 +30,16 @@ type Request struct {
 	search     url.Values         // querystring to e-hentai
 }
 
+type Tag struct {
+	Short string `json:"short"`
+	Long  string `json:"long"`
+}
 type Artwork struct {
-	Category string
-	Title    string
+	Category    string `json:"category"`
+	Title       string `json:"title"`
+	Thumb       string `json:"thumb"`
+	PublishTime string `json:"publish_time"`
+	Tags        []Tag  `json:"tags"`
 }
 type Response struct {
 	Before   string    `json:"before"`
@@ -99,11 +106,11 @@ func (r *Request) Keyword() PropertyManagement {
 }
 
 func (r *Request) Search() (*Response, error) {
-	r.getAndParse(SearchEndpoint)
+	return r.getAndParse(SearchEndpoint)
 
 	//h, _ := ioutil.ReadAll(resp.Body)
 	//fmt.Println(string(h))
-	return &Response{}, nil
+	//return &Response{}, nil
 }
 
 func (r *Request) SearchFavorite() (*Response, error) {
@@ -120,21 +127,49 @@ func (r *Request) getAndParse(url string) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	var output = make([]Artwork, 0)
+	var output []Artwork
 	q.Find(".itg.gltc").Children().Find("tr").Each(func(idx int, s *goquery.Selection) {
-		fmt.Println(s.Html())
+		if idx == 2 {
+			//fmt.Println(s.Html())
+		}
 		if idx > 0 {
-			category, _ := s.Find("td.gl1c.glcat").Find("div").Html()
-			title, _ := s.Find("td:eq(2)").Html()
-			fmt.Println(title)
+			category, err1 := s.Find("td.gl1c.glcat").Find("div").Html()
+			if err1 != nil {
+				fmt.Printf("err1: %s \n", err1.Error())
+			}
+			obj := s.Find("td.gl2c")
+			title := obj.Find("div.glthumb > div > img").AttrOr("alt", "aaaa")
+			thumb := obj.Find("div.glthumb > div > img").AttrOr("data-src", "bbbb")
+			if thumb == "bbbb" {
+				thumb = obj.Find("div.glthumb > div > img").AttrOr("src", "bbbb")
+			}
+			publishTime, err1 := obj.Find("div.glthumb > div > div > div ").Eq(1).Html()
+			if err1 != nil {
+				fmt.Println(err1)
+			}
+			tags := make([]Tag, 0)
+			obj.Find("td").Eq(3).Find("div").Eq(2).Find("div.gt").Each(func(_ int, s *goquery.Selection) {
+				shortTag, _ := s.Html()
+				tags = append(tags, Tag{
+					Long:  s.AttrOr("title", ""),
+					Short: shortTag,
+				})
+			})
 			output = append(output, Artwork{
-				Category: category,
-				Title:    title,
+				Category:    category,
+				Title:       title,
+				Thumb:       thumb,
+				PublishTime: publishTime,
+				Tags:        tags,
 			})
 		}
 	})
-	fmt.Println(output)
-	return &Response{}, nil
+	//fmt.Println(output)
+	return &Response{
+		Before:   "",
+		After:    "",
+		Artworks: output,
+	}, nil
 }
 
 func inArray(input interface{}, collections interface{}) bool {
