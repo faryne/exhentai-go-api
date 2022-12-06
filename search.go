@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -34,12 +35,19 @@ type Tag struct {
 	Short string `json:"short"`
 	Long  string `json:"long"`
 }
+
+type Uploader struct {
+	Name string `json:"name"`
+}
 type Artwork struct {
-	Category    string `json:"category"`
-	Title       string `json:"title"`
-	Thumb       string `json:"thumb"`
-	PublishTime string `json:"publish_time"`
-	Tags        []Tag  `json:"tags"`
+	Id          int64    `json:"id"`
+	Category    string   `json:"category"`
+	Title       string   `json:"title"`
+	Thumb       string   `json:"thumb"`
+	PublishTime string   `json:"publish_time"`
+	Tags        []Tag    `json:"tags"`
+	Uploader    Uploader `json:"uploader"`
+	Pages       int64    `json:"pages"`
 }
 type Response struct {
 	Before   string    `json:"before"`
@@ -117,8 +125,8 @@ func (r *Request) SearchFavorite() (*Response, error) {
 	return &Response{}, nil
 }
 
-func (r *Request) getAndParse(url string) (*Response, error) {
-	resp, err := http.Get(url)
+func (r *Request) getAndParse(fullUrl string) (*Response, error) {
+	resp, err := http.Get(fullUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +136,29 @@ func (r *Request) getAndParse(url string) (*Response, error) {
 		return nil, err
 	}
 	var output []Artwork
+	var id int
 	q.Find(".itg.gltc").Children().Find("tr").Each(func(idx int, s *goquery.Selection) {
 		if idx == 2 {
 			//fmt.Println(s.Html())
 		}
+		attr, _ := s.Find("td.gl3c.glname > a").Eq(0).Attr("href")
+		fmt.Println(attr)
+		if attr != "" {
+			up, _ := url.Parse(attr)
+			splitPath := strings.Split(up.Path, "/")
+			fmt.Printf("%+v, %+v\n", splitPath[2], splitPath[3])
+			return
+		}
+
+		artworkId, _ := s.Find("td.gl2c > div.glcut").Attr("id")
+		id, _ = strconv.Atoi(strings.Replace(artworkId, "ic", "", -1))
 		if idx > 0 {
 			category, err1 := s.Find("td.gl1c.glcat").Find("div").Html()
 			if err1 != nil {
 				fmt.Printf("err1: %s \n", err1.Error())
+			}
+			if category == "" {
+				return
 			}
 			obj := s.Find("td.gl2c")
 			title := obj.Find("div.glthumb > div > img").AttrOr("alt", "aaaa")
@@ -148,19 +171,25 @@ func (r *Request) getAndParse(url string) (*Response, error) {
 				fmt.Println(err1)
 			}
 			tags := make([]Tag, 0)
-			obj.Find("td").Eq(3).Find("div").Eq(2).Find("div.gt").Each(func(_ int, s *goquery.Selection) {
+			s.Find("div.gt").Each(func(_ int, s *goquery.Selection) {
 				shortTag, _ := s.Html()
 				tags = append(tags, Tag{
 					Long:  s.AttrOr("title", ""),
 					Short: shortTag,
 				})
 			})
+			uploader, _ := s.Find("td.gl4c.glhide > div").Eq(0).Find("a").Html()
+			pages, _ := s.Find("td.gl4c.glhide > div").Eq(1).Html()
+			var pageNum, _ = strconv.Atoi(strings.Replace(pages, " pages", "", -1))
 			output = append(output, Artwork{
+				Id:          int64(id),
 				Category:    category,
 				Title:       title,
 				Thumb:       thumb,
 				PublishTime: publishTime,
 				Tags:        tags,
+				Uploader:    Uploader{Name: uploader},
+				Pages:       int64(pageNum),
 			})
 		}
 	})
