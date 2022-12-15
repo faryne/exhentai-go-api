@@ -1,8 +1,11 @@
 package exhentai_go_api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -50,10 +53,44 @@ type Artwork struct {
 	Pages       int64    `json:"pages"`
 }
 type Response struct {
-	Before   string    `json:"before"`
-	After    string    `json:"after"`
-	Artworks []Artwork `json:"artworks"`
+	Before     string    `json:"before"`
+	After      string    `json:"after"`
+	Artworks   []Artwork `json:"artworks"`
+	ArtworksV2 ArtworkV2 `json:"artworks_v2"`
 }
+
+type ArtworkV2 struct {
+	GMetadata []struct {
+		Gid          int64  `json:"gid"`
+		Token        string `json:"token"`
+		ArchiverKey  string `json:"archiver_key"`
+		Title        string `json:"title"`
+		TitleJpn     string `json:"title_jpn"`
+		Category     string `json:"category"`
+		Thumb        string `json:"thumb"`
+		Uploader     string `json:"uploader"`
+		Posted       string `json:"posted"`
+		FileCount    string `json:"filecount"`
+		FileSize     int64  `json:"filesize"`
+		Expunged     bool   `json:"expunged"`
+		Rating       string `json:"rating"`
+		TorrentCount string `json:"torrentcount"`
+		Torrents     []struct {
+			Hash  string `json:"hash"`
+			Added string `json:"added"`
+			Name  string `json:"name"`
+			TSize string `json:"tsize"`
+			FSize string `json:"fsize"`
+		} `json:"torrents"`
+		Tags      []string `json:"tags"`
+		ParentGid string   `json:"parent_gid"`
+		ParentKey string   `json:"parent_key"`
+		FirstGid  string   `json:"first_gid"`
+		FirstKey  string   `json:"first_key"`
+	} `json:"gmetadata"`
+}
+
+var gidList = make([][2]interface{}, 0)
 
 func New() *Request {
 	var req = Request{}
@@ -135,69 +172,41 @@ func (r *Request) getAndParse(fullUrl string) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	var output []Artwork
-	var id int
+	//var output []Artwork
 	q.Find(".itg.gltc").Children().Find("tr").Each(func(idx int, s *goquery.Selection) {
-		if idx == 2 {
-			//fmt.Println(s.Html())
-		}
 		attr, _ := s.Find("td.gl3c.glname > a").Eq(0).Attr("href")
-		fmt.Println(attr)
 		if attr != "" {
 			up, _ := url.Parse(attr)
 			splitPath := strings.Split(up.Path, "/")
-			fmt.Printf("%+v, %+v\n", splitPath[2], splitPath[3])
+			artworkId, _ := strconv.Atoi(splitPath[2])
+			artworkToken := splitPath[3]
+			gidList = append(gidList, [2]interface{}{artworkId, artworkToken})
+			//fmt.Printf("%+v, %+v\n", splitPath[2], splitPath[3])
 			return
 		}
-
-		artworkId, _ := s.Find("td.gl2c > div.glcut").Attr("id")
-		id, _ = strconv.Atoi(strings.Replace(artworkId, "ic", "", -1))
-		if idx > 0 {
-			category, err1 := s.Find("td.gl1c.glcat").Find("div").Html()
-			if err1 != nil {
-				fmt.Printf("err1: %s \n", err1.Error())
-			}
-			if category == "" {
-				return
-			}
-			obj := s.Find("td.gl2c")
-			title := obj.Find("div.glthumb > div > img").AttrOr("alt", "aaaa")
-			thumb := obj.Find("div.glthumb > div > img").AttrOr("data-src", "bbbb")
-			if thumb == "bbbb" {
-				thumb = obj.Find("div.glthumb > div > img").AttrOr("src", "bbbb")
-			}
-			publishTime, err1 := obj.Find("div.glthumb > div > div > div ").Eq(1).Html()
-			if err1 != nil {
-				fmt.Println(err1)
-			}
-			tags := make([]Tag, 0)
-			s.Find("div.gt").Each(func(_ int, s *goquery.Selection) {
-				shortTag, _ := s.Html()
-				tags = append(tags, Tag{
-					Long:  s.AttrOr("title", ""),
-					Short: shortTag,
-				})
-			})
-			uploader, _ := s.Find("td.gl4c.glhide > div").Eq(0).Find("a").Html()
-			pages, _ := s.Find("td.gl4c.glhide > div").Eq(1).Html()
-			var pageNum, _ = strconv.Atoi(strings.Replace(pages, " pages", "", -1))
-			output = append(output, Artwork{
-				Id:          int64(id),
-				Category:    category,
-				Title:       title,
-				Thumb:       thumb,
-				PublishTime: publishTime,
-				Tags:        tags,
-				Uploader:    Uploader{Name: uploader},
-				Pages:       int64(pageNum),
-			})
-		}
 	})
-	//fmt.Println(output)
+	//fmt.Printf("%#v \n", gidList)
+	type GetDetailRequest struct {
+		Method  string           `json:"method"`
+		GidList [][2]interface{} `json:"gidlist"`
+	}
+	var rContent = GetDetailRequest{GidList: gidList, Method: "gdata"}
+	reqBody, _ := json.Marshal(rContent)
+	var buf = bytes.NewBuffer(reqBody)
+	body, err := http.Post("https://api.e-hentai.org/api.php", "application/json", buf)
+	if err != nil {
+		fmt.Println("get detail error: ", err.Error())
+		return nil, nil
+	}
+	defer body.Body.Close()
+	content, _ := ioutil.ReadAll(body.Body)
+	var respOutput ArtworkV2
+	json.Unmarshal(content, &respOutput)
+	//fmt.Println(string(content))
 	return &Response{
-		Before:   "",
-		After:    "",
-		Artworks: output,
+		Before:     "",
+		After:      "",
+		ArtworksV2: respOutput,
 	}, nil
 }
 
